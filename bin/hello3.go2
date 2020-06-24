@@ -1,0 +1,29 @@
+package main 
+import "fmt"
+
+func Print<type T, V>(s []T) {
+	for _, v := range s {
+		fmt.Print(v)
+	}
+}
+
+// List is a linked list of values of type T.
+type List<type T, V> struct {
+	next *List<T, V>;
+	next2 *List<T, V>;
+	val  T
+}
+
+func Smallest(type T)(s []T) T {
+	r := s[0] // panic if slice is empty
+	for _, v := range s[1:] {
+		if v < r { // INVALID
+			r = v
+		}
+	}
+	return r
+}
+
+func main() {
+//	Print<string, int>([]string {"1", "2"})
+}

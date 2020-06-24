@@ -1,0 +1,91 @@
+package main 
+
+import "fmt"
+
+func Print<type T>(s []T) {
+	for _, v := range s {
+		fmt.Print(v)
+	}
+}
+
+type Stringer interface {
+	String() string
+}
+func Stringify<type T Stringer>(s []T) (ret []string) {
+	for _, v := range s {
+		ret = append(ret, v.String())
+	}
+	return ret
+}
+
+type NumberString interface {
+	type int,int8,int16,int32,int64,
+		 uint,uint16,uint32,uint64,
+		 float32,float64,
+		 complex64,complex128,
+		 byte,uintptr,string
+}
+
+type Monoid<type A> interface{
+	Combine(x A, y A) A
+}
+
+type Numeric interface {
+	type int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, uintptr,
+		float32, float64,
+		complex64, complex128
+}
+
+type NumericAbs<type T> interface {
+	Numeric
+	Abs() T
+}
+
+// AbsDifference computes the absolute value of the difference of
+// a and b, where the absolute value is determined by the Abs method.
+func AbsDifference<type T NumericAbs>(a, b T) T {
+	d := a - b
+	return d.Abs()
+}
+
+type Concat<type A NumberString> struct{}
+
+func (c Concat<A>) Combine(x A, y A) A {
+	return x + y 
+}
+func (c Concat<A>) String() string {
+	return "Concat<A>"
+}
+
+type Concat2 struct{}
+
+func (c Concat2) String() string {
+	return "Concat2"
+}
+
+
+// List is a linked list of values of type T.
+type List<type T> struct {
+	next *List<T> // this reference to List(T) is OK
+	val  T
+}
+
+// This type is INVALID.
+type P<type T1, T2> struct {
+	F *P<T2, T1> // INVALID; must be (T1, T2)
+}
+
+func main() {
+	Print<string>([]string{"Hello, ", "playground\n"})
+
+	cs2 := Concat2{}
+	fmt.Println(Stringify<Concat2>([]Concat2{cs2}))
+
+	c := Concat<int>{}
+	fmt.Println(c.Combine(1,2))
+	c2 := Concat<string>{}
+	fmt.Println(c2.Combine("hello ","world!"))
+	c3 := Concat<int>{}
+	fmt.Println(c3.Combine(10,20))
+}

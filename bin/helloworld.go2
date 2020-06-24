@@ -1,0 +1,57 @@
+package main
+import (
+	"fmt"
+)
+
+func Print<type T>(s []T) {
+	for _, v := range s {
+		fmt.Print(v)
+	}
+}
+
+// Map turns a []T1 to a []T2 using a mapping function.
+func Map<type T1, T2>(s []T1, f func(T1) T2) []T2 {
+	r := make([]T2, len(s))
+	for i, v := range s {
+		r[i] = f(v)
+	}
+	return r
+}
+
+// Reduce reduces a []T1 to a single value using a reduction function.
+func Reduce<type T1, T2>(s []T1, initializer T2, f func(T2, T1) T2) T2 {
+	r := initializer
+	for _, v := range s {
+		r = f(r, v)
+	}
+	return r
+}
+
+// Filter filters values from a slice using a filter function.
+func Filter<type T>(s []T, f func(T) bool) []T {
+	var r []T
+	for _, v := range s {
+		if f(v) {
+			r = append(r, v)
+		}
+	}
+	return r
+}
+
+func main() {
+	Print<string>([]string{"Hello, ", "playground\n"})
+
+	s := []int{1, 2, 3}
+
+	fmt.Println("-----Map--------")
+	floats := Map<int, float64>(s, func(i int) float64 { return float64(i) })
+	Print(floats)
+
+	fmt.Println("\n-----Reduce--------")
+	sum := Reduce(int, int)(s, 0, func(i, j int) int { return i + j })
+	fmt.Print(sum)
+
+	fmt.Println("\n------Filter-------")
+	evens := Filter(int)(s, func(i int) bool { return i%2 == 0 })
+	Print(evens)
+}
