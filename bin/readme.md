@@ -2,6 +2,9 @@
 ## 命令
 
 ```
+# 编译 go
+make.bat -v --no-clean
+
 # 运行
 go tool go2go run monoid.go2
 
@@ -19,24 +22,15 @@ go tool go2go translate monoid.go2
 
 ```
 // ------------------
-t := time.Now()
-switch {
-case t.Hour() < 12: //missing ',' in argument list
-    fmt.Println("It's before noon")
-default:
-    fmt.Println("It's after noon")
-}
-
-// ------------------
-func Reverse <type T> (list []T) {
-	i := 0
-	j := len(list)-1
-	for i < j {
-		list[i], list[j] = list[j], list[i] //expected '==', found '='
-		i++
-		j--
-	}
-}
+ func Smallest<type T comparable>(s []T) T {
+ 	r := s[0] // panic if slice is empty
+ 	for _, v := range s[1:] {
+ 		if v < r { // INVALID, cannot compare v < r (operator < not defined for T)
+ 			r = v
+ 		}
+ 	}
+ 	return r
+ }
 
 ```
 

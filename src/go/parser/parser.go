@@ -1785,10 +1785,24 @@ func (p *parser) parsePrimaryExpr(lhs bool) (x ast.Expr) {
 			}
 			x = p.parseCallOrConversion(p.checkExprOrType(x))
 		case token.LSS:
-			if lhs {
-				p.resolve(x)
+			t := unparen(x)
+			switch v := t.(type) {
+			case *ast.Ident: //, *ast.SelectorExpr:
+				if p.exprLev < 0 {
+					return
+				}
+
+				if v.Obj != nil && v.Obj.Kind != ast.Bad && v.Obj.Kind != ast.Typ && v.Obj.Kind != ast.Fun {
+					return
+				}
+
+				if lhs {
+					p.resolve(x)
+				}
+				x = p.parseCallOrConversion2(p.checkExprOrType(x))
+			default:
+				return
 			}
-			x = p.parseCallOrConversion2(p.checkExprOrType(x))
 		case token.LBRACE:
 			// operand may have returned a parenthesized complit
 			// type; accept it but complain if we have a complit
@@ -2750,7 +2764,6 @@ func (p *parser) parseTypeSpec(doc *ast.CommentGroup, _ token.Pos, _ token.Token
 			} else {
 				rparen := p.expect(token.GTR)
 				spec.Type = &ast.ParenExpr{Lparen: lparen, X: typ, Rparen: rparen}
-				//spec.Type = &ast.AngleExpr{Lparen: lparen, X: typ, Rparen: rparen}
 			}
 		}
 

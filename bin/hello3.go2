@@ -14,15 +14,15 @@ type List<type T, V> struct {
 	val  T
 }
 
-func Smallest(type T)(s []T) T {
-	r := s[0] // panic if slice is empty
-	for _, v := range s[1:] {
-		if v < r { // INVALID
-			r = v
-		}
-	}
-	return r
-}
+ func Smallest<type T comparable>(s []T) T {
+ 	r := s[0] // panic if slice is empty
+ 	for _, v := range s[1:] {
+ 		if v < r { // INVALID, cannot compare v < r (operator < not defined for T)
+ 			r = v
+ 		}
+ 	}
+ 	return r
+ }
 
 func main() {
 //	Print<string, int>([]string {"1", "2"})
