@@ -296,6 +296,14 @@ func rewriteAST(fset *token.FileSet, importer *Importer, importPath string, tpkg
 	}
 	file.Decls = decls
 
+	// If we have a ./ import, let it override a standard import
+	// we may have added due to t.typePackages.
+	for path := range imps {
+		if strings.HasPrefix(path, "./") {
+			delete(imps, strings.TrimPrefix(path, "./"))
+		}
+	}
+
 	paths := make([]string, 0, len(imps))
 	for p := range imps {
 		paths = append(paths, p)
@@ -640,6 +648,7 @@ func (t *translator) translateExpr(pe *ast.Expr) {
 	}
 	switch e := (*pe).(type) {
 	case *ast.Ident:
+		t.translateIdent(pe)
 	case *ast.Ellipsis:
 		t.translateExpr(&e.Elt)
 	case *ast.BasicLit:
@@ -707,6 +716,38 @@ func (t *translator) translateExpr(pe *ast.Expr) {
 	}
 }
 
+// translateIdent translates a simple identifier from Go with
+// contracts to Go 1. These are usually fine as is, but a reference
+// to a non-generic name in another package may need a package qualifier.
+func (t *translator) translateIdent(pe *ast.Expr) {
+	e := (*pe).(*ast.Ident)
+	obj := t.importer.info.ObjectOf(e)
+	if obj == nil {
+		return
+	}
+	if named, ok := obj.Type().(*types.Named); ok && len(named.TParams()) > 0 {
+		// A generic function that will be instantiated locally.
+		return
+	}
+	ipkg := obj.Pkg()
+	if ipkg == nil || ipkg == t.tpkg {
+		// We don't need a package qualifier if it's defined
+		// in the current package.
+		return
+	}
+	if obj.Parent() != ipkg.Scope() {
+		// We only need a package qualifier if it's defined in
+		// package scope.
+		return
+	}
+
+	// Add package qualifier.
+	*pe = &ast.SelectorExpr{
+		X:   ast.NewIdent(ipkg.Name()),
+		Sel: e,
+	}
+}
+
 // translateSelectorExpr translates a selector expression
 // from Go with contracts to Go 1.
 func (t *translator) translateSelectorExpr(pe *ast.Expr) {
@@ -730,6 +771,10 @@ func (t *translator) translateSelectorExpr(pe *ast.Expr) {
 		if fobj != nil && len(indexes) > 1 {
 			for _, index := range indexes[:len(indexes)-1] {
 				xf := xType.Struct().Field(index)
+				// This must be an embedded type.
+				// If the field name is the one we expect,
+				// don't mention it explicitly,
+				// because it might not be exported.
 				if xf.Name() == types.TypeString(xf.Type(), relativeTo(xf.Pkg())) {
 					continue
 				}
@@ -940,6 +985,9 @@ func (t *translator) translateTypeInstantiation(pe *ast.Expr) {
 func (t *translator) instantiatedIdent(call *ast.CallExpr) qualifiedIdent {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
+		if obj := t.importer.info.ObjectOf(fun); obj != nil && obj.Pkg() != t.tpkg {
+			return qualifiedIdent{pkg: obj.Pkg(), ident: fun}
+		}
 		return qualifiedIdent{ident: fun}
 	case *ast.SelectorExpr:
 		pkgname, ok := fun.X.(*ast.Ident)
@@ -987,7 +1035,7 @@ func (t *translator) instantiationTypes(call *ast.CallExpr) (argList []ast.Expr,
 	// Instantiating with a locally defined type won't work.
 	// Check that here.
 	for i, typ := range typeList {
-		if named, ok := typ.(*types.Named); ok {
+		if named, ok := typ.(*types.Named); ok && named.Obj().Pkg() != nil {
 			if scope := named.Obj().Parent(); scope != nil && scope != named.Obj().Pkg().Scope() {
 				var pos token.Pos
 				if haveInferred {
@@ -1124,22 +1172,7 @@ func (t *translator) typeWithoutArgs(typ *types.Named) *types.Named {
 func (t *translator) typeListToASTList(typeList []types.Type) ([]types.Type, []ast.Expr) {
 	argList := make([]ast.Expr, 0, len(typeList))
 	for _, typ := range typeList {
-		str := types.TypeString(typ, relativeTo(t.tpkg))
-		arg := ast.NewIdent("(" + str + ")")
-		if named, ok := typ.(*types.Named); ok {
-			if len(named.TArgs()) > 0 {
-				var narg *ast.Ident
-				_, narg = t.lookupInstantiatedType(named)
-				if t.err != nil {
-					return nil, nil
-				}
-				if narg != nil {
-					arg = ast.NewIdent(narg.Name)
-				}
-			}
-		}
-		argList = append(argList, arg)
-		t.setType(arg, typ)
+		argList = append(argList, t.typeToAST(typ))
 
 		// This inferred type may introduce a reference to
 		// packages that we don't otherwise import, and that

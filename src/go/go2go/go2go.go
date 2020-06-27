@@ -86,22 +86,32 @@ func rewriteFilesInPath(importer *Importer, importPath, dir string, go2files []s
 			Importer: importer,
 			Error:    merr.add,
 		}
-		tpkg, err := conf.Check(pkg.Name, fset, asts, importer.info)
+		path := importPath
+		if path == "" {
+			path = pkg.Name
+		}
+		tpkg, err := conf.Check(path, fset, asts, importer.info)
 		if err != nil {
 			return nil, fmt.Errorf("type checking failed for %s\n%v", pkg.Name, merr)
 		}
 
-		if !strings.HasSuffix(pkg.Name, "_test") {
-			importer.record(pkgfiles, importPath, tpkg, asts)
-		}
+		importer.record(pkg.Name, pkgfiles, importPath, tpkg, asts)
 
 		rpkgs = append(rpkgs, tpkg)
 		tpkgs = append(tpkgs, pkgfiles)
 	}
 
 	for i, tpkg := range tpkgs {
+		addImportable := 0
 		for j, pkgfile := range tpkg {
-			if err := rewriteFile(dir, fset, importer, importPath, rpkgs[i], pkgfile.name, pkgfile.ast, j == 0); err != nil {
+			if !strings.HasSuffix(pkgfile.name, "_test.go2") {
+				addImportable = j
+				break
+			}
+		}
+
+		for j, pkgfile := range tpkg {
+			if err := rewriteFile(dir, fset, importer, importPath, rpkgs[i], pkgfile.name, pkgfile.ast, j == addImportable); err != nil {
 				return nil, err
 			}
 		}
