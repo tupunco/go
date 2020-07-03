@@ -22,6 +22,8 @@ type substMap struct {
 	proj  map[*TypeParam]Type
 }
 
+// makeSubstMap creates a new substitution map mapping tpars[i] to targs[i].
+// If targs[i] is nil, tpars[i] is not substituted.
 func makeSubstMap(tpars []*TypeName, targs []Type) *substMap {
 	assert(len(tpars) == len(targs))
 	proj := make(map[*TypeParam]Type, len(tpars))
@@ -29,10 +31,9 @@ func makeSubstMap(tpars []*TypeName, targs []Type) *substMap {
 		// We must expand type arguments otherwise *Instance
 		// types end up as components in composite types.
 		// TODO(gri) explain why this causes problems, if it does
-		targ := expand(targs[i])
+		targ := expand(targs[i]) // possibly nil
 		targs[i] = targ
-		assert(targ != nil)
-		proj[tpar.typ.(*TypeParam)] = targs[i]
+		proj[tpar.typ.(*TypeParam)] = targ
 	}
 	return &substMap{targs, proj}
 }
@@ -424,7 +425,21 @@ func instantiatedHash(typ *Named, targs []Type) string {
 	buf.WriteByte('(')
 	writeTypeList(&buf, targs, nil, nil)
 	buf.WriteByte(')')
-	return buf.String()
+
+	// With respect to the represented type, whether a
+	// type is fully expanded or stored as instance
+	// does not matter - they are the same types.
+	// Remove the instanceMarkers printed for instances.
+	res := buf.Bytes()
+	i := 0
+	for _, b := range res {
+		if b != instanceMarker {
+			res[i] = b
+			i++
+		}
+	}
+
+	return string(res[:i])
 }
 
 func typeListString(list []Type) string {
