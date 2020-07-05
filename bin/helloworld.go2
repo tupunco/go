@@ -48,10 +48,10 @@ func main() {
 	Print(floats)
 
 	fmt.Println("\n-----Reduce--------")
-	sum := Reduce(int, int)(s, 0, func(i, j int) int { return i + j })
+	sum := Reduce<int, int>(s, 0, func(i, j int) int { return i + j })
 	fmt.Print(sum)
 
 	fmt.Println("\n------Filter-------")
-	evens := Filter(int)(s, func(i int) bool { return i%2 == 0 })
+	evens := Filter<int>(s, func(i int) bool { return i%2 == 0 })
 	Print(evens)
 }
