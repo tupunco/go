@@ -240,19 +240,20 @@ type subster struct {
 func (subst *subster) typ(typ Type) Type {
 	switch t := typ.(type) {
 	case nil:
+		// Call typOrNil if it's possible that typ is nil.
 		panic("nil typ")
 
 	case *Basic, *bottom, *top:
 		// nothing to do
 
 	case *Array:
-		elem := subst.typ(t.elem)
+		elem := subst.typOrNil(t.elem)
 		if elem != t.elem {
 			return &Array{len: t.len, elem: elem}
 		}
 
 	case *Slice:
-		elem := subst.typ(t.elem)
+		elem := subst.typOrNil(t.elem)
 		if elem != t.elem {
 			return &Slice{elem: elem}
 		}
@@ -336,8 +337,6 @@ func (subst *subster) typ(typ Type) Type {
 			}
 		}
 
-		assert(t.underlying != nil)
-
 		if t.tparams == nil {
 			dump(">>> %s is not parameterized", t)
 			return t // type is not parameterized
@@ -398,7 +397,7 @@ func (subst *subster) typ(typ Type) Type {
 
 		// do the substitution
 		dump(">>> subst %s with %s (new: %s)", t.underlying, subst.smap, new_targs)
-		named.underlying = subst.typ(t.underlying)
+		named.underlying = subst.typOrNil(t.underlying)
 		named.orig = named.underlying // for cycle detection (Checker.validType)
 
 		return named
@@ -446,6 +445,16 @@ func typeListString(list []Type) string {
 	var buf bytes.Buffer
 	writeTypeList(&buf, list, nil, nil)
 	return buf.String()
+}
+
+// typOrNil is like typ but if the argument is nil it is replaced with Typ[Invalid].
+// A nil type may appear in pathological cases such as type T(type P) []func(_ T([]_))
+// where an array/slice element is accessed before it is set up.
+func (subst *subster) typOrNil(typ Type) Type {
+	if typ == nil {
+		return Typ[Invalid]
+	}
+	return subst.typ(typ)
 }
 
 func (subst *subster) var_(v *Var) *Var {
