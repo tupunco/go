@@ -512,7 +512,10 @@ L: // unpack receiver type
 	}
 
 	// unpack type parameters, if any
-	if ptyp, _ := rtyp.(*ast.CallExpr); ptyp != nil {
+	switch ptyp := rtyp.(type) {
+	case *ast.IndexExpr:
+		panic("unimplemented")
+	case *ast.CallExpr:
 		rtyp = ptyp.Fun
 		if unpackParams {
 			for _, arg := range ptyp.Args {

@@ -398,9 +398,9 @@ func goTypeName(typ Type) string {
 // typInternal drives type checking of types.
 // Must only be called by definedType or genericType.
 //
-func (check *Checker) typInternal(e ast.Expr, def *Named) (T Type) {
+func (check *Checker) typInternal(e0 ast.Expr, def *Named) (T Type) {
 	if check.conf.Trace {
-		check.trace(e.Pos(), "type %s", e)
+		check.trace(e0.Pos(), "type %s", e0)
 		check.indent++
 		defer func() {
 			check.indent--
@@ -413,14 +413,14 @@ func (check *Checker) typInternal(e ast.Expr, def *Named) (T Type) {
 				under = T.Underlying()
 			}
 			if T == under {
-				check.trace(e.Pos(), "=> %s // %s", T, goTypeName(T))
+				check.trace(e0.Pos(), "=> %s // %s", T, goTypeName(T))
 			} else {
-				check.trace(e.Pos(), "=> %s (under = %s) // %s", T, under, goTypeName(T))
+				check.trace(e0.Pos(), "=> %s (under = %s) // %s", T, under, goTypeName(T))
 			}
 		}()
 	}
 
-	switch e := e.(type) {
+	switch e := e0.(type) {
 	case *ast.BadExpr:
 		// ignore - error reported before
 
@@ -458,47 +458,14 @@ func (check *Checker) typInternal(e ast.Expr, def *Named) (T Type) {
 			check.errorf(x.pos(), "%s is not a type", &x)
 		}
 
+	case *ast.IndexExpr:
+		if check.useBrackets {
+			return check.instantiatedType(e.X, []ast.Expr{e.Index}, def)
+		}
+		check.errorf(e0.Pos(), "%s is not a type", e0)
+
 	case *ast.CallExpr:
-		b := check.genericType(e.Fun, true) // TODO(gri) what about cycles?
-		if b == Typ[Invalid] {
-			return b // error already reported
-		}
-		base := b.Named()
-		if base == nil {
-			unreachable() // should have been caught by genericType
-		}
-
-		// create a new type Instance rather than instantiate the type
-		// TODO(gri) should do argument number check here rather than
-		// when instantiating the type?
-		typ := new(instance)
-		def.setUnderlying(typ)
-
-		typ.check = check
-		typ.pos = e.Pos()
-		typ.base = base
-
-		// evaluate arguments (always)
-		typ.targs = check.typeList(e.Args)
-		if typ.targs == nil {
-			def.setUnderlying(Typ[Invalid]) // avoid later errors due to lazy instantiation
-			return Typ[Invalid]
-		}
-
-		// determine argument positions (for error reporting)
-		typ.poslist = make([]token.Pos, len(e.Args))
-		for i, arg := range e.Args {
-			typ.poslist[i] = arg.Pos()
-		}
-
-		// make sure we check instantiation works at least once
-		// and that the resulting type is valid
-		check.atEnd(func() {
-			t := typ.expand()
-			check.validType(t, nil)
-		})
-
-		return typ
+		return check.instantiatedType(e.Fun, e.Args, def)
 
 	case *ast.ParenExpr:
 		// Generic types must be instantiated before they can be used in any form.
@@ -512,13 +479,12 @@ func (check *Checker) typInternal(e ast.Expr, def *Named) (T Type) {
 			typ.len = check.arrayLength(e.Len)
 			typ.elem = check.typ(e.Elt)
 			return typ
-
-		} else {
-			typ := new(Slice)
-			def.setUnderlying(typ)
-			typ.elem = check.typ(e.Elt)
-			return typ
 		}
+
+		typ := new(Slice)
+		def.setUnderlying(typ)
+		typ.elem = check.typ(e.Elt)
+		return typ
 
 	case *ast.StructType:
 		typ := new(Struct)
@@ -590,7 +556,7 @@ func (check *Checker) typInternal(e ast.Expr, def *Named) (T Type) {
 		return typ
 
 	default:
-		check.errorf(e.Pos(), "%s is not a type", e)
+		check.errorf(e0.Pos(), "%s is not a type", e0)
 	}
 
 	typ := Typ[Invalid]
@@ -626,6 +592,49 @@ func (check *Checker) typeOrNil(e ast.Expr) Type {
 		check.errorf(x.pos(), "%s is not a type", &x)
 	}
 	return Typ[Invalid]
+}
+
+func (check *Checker) instantiatedType(x ast.Expr, targs []ast.Expr, def *Named) Type {
+	b := check.genericType(x, true) // TODO(gri) what about cycles?
+	if b == Typ[Invalid] {
+		return b // error already reported
+	}
+	base := b.Named()
+	if base == nil {
+		unreachable() // should have been caught by genericType
+	}
+
+	// create a new type Instance rather than instantiate the type
+	// TODO(gri) should do argument number check here rather than
+	// when instantiating the type?
+	typ := new(instance)
+	def.setUnderlying(typ)
+
+	typ.check = check
+	typ.pos = x.Pos()
+	typ.base = base
+
+	// evaluate arguments (always)
+	typ.targs = check.typeList(targs)
+	if typ.targs == nil {
+		def.setUnderlying(Typ[Invalid]) // avoid later errors due to lazy instantiation
+		return Typ[Invalid]
+	}
+
+	// determine argument positions (for error reporting)
+	typ.poslist = make([]token.Pos, len(targs))
+	for i, arg := range targs {
+		typ.poslist[i] = arg.Pos()
+	}
+
+	// make sure we check instantiation works at least once
+	// and that the resulting type is valid
+	check.atEnd(func() {
+		t := typ.expand()
+		check.validType(t, nil)
+	})
+
+	return typ
 }
 
 // arrayLength type-checks the array length expression e

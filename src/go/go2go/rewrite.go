@@ -284,11 +284,16 @@ func rewriteAST(fset *token.FileSet, importer *Importer, importPath string, tpkg
 			}
 			// We picked up Go 2 imports above, but we still
 			// need to pick up Go 1 imports here.
-			path := strings.TrimPrefix(strings.TrimSuffix(imp.Path.Value, `"`), `"`)
-			if imps[path] {
+			path, err := strconv.Unquote(imp.Path.Value)
+			if err != nil || imps[path] {
 				continue
 			}
-			imps[path] = true
+			if imp.Name == nil {
+				// If Name != nil we are keeping the spec.
+				// Don't add the import again here,
+				// only if it is needed elsewhere.
+				imps[path] = true
+			}
 			for _, p := range importer.transitiveImports(path) {
 				imps[p] = true
 			}
@@ -497,7 +502,7 @@ func (t *translator) translate(file *ast.File) {
 // translateTypeSpec translates a type from generic Go to Go 1.
 func (t *translator) translateTypeSpec(ps *ast.Spec) {
 	ts := (*ps).(*ast.TypeSpec)
-	if ts.TParams != nil {
+	if ts.TParams != nil && len(ts.TParams.List) > 0 {
 		t.err = fmt.Errorf("%s: go2go tool does not support parameterized type here", t.fset.Position((*ps).Pos()))
 		return
 	}
@@ -519,8 +524,11 @@ func (t *translator) translateFuncDecl(pd *ast.Decl) {
 		return
 	}
 	fd := (*pd).(*ast.FuncDecl)
-	if fd.Type.TParams != nil && len(fd.Type.TParams.List) > 0 {
-		panic("parameterized function")
+	if fd.Type.TParams != nil {
+		if len(fd.Type.TParams.List) > 0 {
+			panic("parameterized function")
+		}
+		fd.Type.TParams = nil
 	}
 	if fd.Recv != nil {
 		t.translateFieldList(fd.Recv)
@@ -659,6 +667,11 @@ func (t *translator) translateExpr(pe *ast.Expr) {
 	case *ast.SelectorExpr:
 		t.translateSelectorExpr(pe)
 	case *ast.IndexExpr:
+		if ftyp, ok := t.lookupType(e.X).(*types.Signature); ok && len(ftyp.TParams()) > 0 {
+			t.translateFunctionInstantiation(pe)
+		} else if ntyp, ok := t.lookupType(e.X).(*types.Named); ok && len(ntyp.TParams()) > 0 && len(ntyp.TArgs()) == 0 {
+			t.translateTypeInstantiation(pe)
+		}
 		t.translateExpr(&e.X)
 		t.translateExpr(&e.Index)
 	case *ast.SliceExpr:
@@ -871,9 +884,9 @@ func (t *translator) translateField(f *ast.Field) {
 // translateFunctionInstantiation translates an instantiated function
 // to Go 1.
 func (t *translator) translateFunctionInstantiation(pe *ast.Expr) {
-	call := (*pe).(*ast.CallExpr)
-	qid := t.instantiatedIdent(call)
-	argList, typeList, typeArgs := t.instantiationTypes(call)
+	expr := *pe
+	qid := t.instantiatedIdent(expr)
+	argList, typeList, typeArgs := t.instantiationTypes(expr)
 	if t.err != nil {
 		return
 	}
@@ -906,6 +919,7 @@ func (t *translator) translateFunctionInstantiation(pe *ast.Expr) {
 	if typeArgs {
 		*pe = instIdent
 	} else {
+		call := expr.(*ast.CallExpr)
 		newCall := *call
 		newCall.Fun = instIdent
 		*pe = &newCall
@@ -914,10 +928,10 @@ func (t *translator) translateFunctionInstantiation(pe *ast.Expr) {
 
 // translateTypeInstantiation translates an instantiated type to Go 1.
 func (t *translator) translateTypeInstantiation(pe *ast.Expr) {
-	call := (*pe).(*ast.CallExpr)
-	qid := t.instantiatedIdent(call)
-	typ := t.lookupType(call.Fun).(*types.Named)
-	argList, typeList, typeArgs := t.instantiationTypes(call)
+	expr := *pe
+	qid := t.instantiatedIdent(expr)
+	typ := t.lookupType(qid.ident).(*types.Named)
+	argList, typeList, typeArgs := t.instantiationTypes(expr)
 	if t.err != nil {
 		return
 	}
@@ -982,8 +996,18 @@ func (t *translator) translateTypeInstantiation(pe *ast.Expr) {
 
 // instantiatedIdent returns the qualified identifer that is being
 // instantiated.
-func (t *translator) instantiatedIdent(call *ast.CallExpr) qualifiedIdent {
-	switch fun := call.Fun.(type) {
+func (t *translator) instantiatedIdent(x ast.Expr) qualifiedIdent {
+	var fun ast.Expr
+	switch x := x.(type) {
+	case *ast.CallExpr:
+		fun = x.Fun
+	case *ast.IndexExpr:
+		fun = x.X
+	default:
+		panic(fmt.Sprintf("unexpected AST %T", x))
+	}
+
+	switch fun := fun.(type) {
 	case *ast.Ident:
 		if obj := t.importer.info.ObjectOf(fun); obj != nil && obj.Pkg() != t.tpkg {
 			return qualifiedIdent{pkg: obj.Pkg(), ident: fun}
@@ -1004,17 +1028,28 @@ func (t *translator) instantiatedIdent(call *ast.CallExpr) qualifiedIdent {
 		}
 		return qualifiedIdent{pkg: pn.Imported(), ident: fun.Sel}
 	}
-	panic(fmt.Sprintf("instantiated object %T %v is not an identifier", call.Fun, call.Fun))
+	panic(fmt.Sprintf("instantiated object %T %v is not an identifier", fun, fun))
 }
 
 // instantiationTypes returns the type arguments of an instantiation.
 // It also returns the AST arguments if they are present.
 // The typeArgs result reports whether the AST arguments are types.
-func (t *translator) instantiationTypes(call *ast.CallExpr) (argList []ast.Expr, typeList []types.Type, typeArgs bool) {
-	inferred, haveInferred := t.importer.info.Inferred[call]
+func (t *translator) instantiationTypes(x ast.Expr) (argList []ast.Expr, typeList []types.Type, typeArgs bool) {
+	var inferred types.Inferred
+	haveInferred := false
+	var args []ast.Expr
+	switch x := x.(type) {
+	case *ast.CallExpr:
+		inferred, haveInferred = t.importer.info.Inferred[x]
+		args = x.Args
+	case *ast.IndexExpr:
+		args = []ast.Expr{x.Index}
+	default:
+		panic("unexpected AST type")
+	}
 
 	if !haveInferred {
-		argList = call.Args
+		argList = args
 		typeList = make([]types.Type, 0, len(argList))
 		for _, arg := range argList {
 			if id, ok := arg.(*ast.Ident); ok && id.Name == "_" {
@@ -1034,16 +1069,10 @@ func (t *translator) instantiationTypes(call *ast.CallExpr) (argList []ast.Expr,
 
 	// Instantiating with a locally defined type won't work.
 	// Check that here.
-	for i, typ := range typeList {
+	for _, typ := range typeList {
 		if named, ok := typ.(*types.Named); ok && named.Obj().Pkg() != nil {
 			if scope := named.Obj().Parent(); scope != nil && scope != named.Obj().Pkg().Scope() {
-				var pos token.Pos
-				if haveInferred {
-					pos = call.Pos()
-				} else {
-					pos = call.Args[i].Pos()
-				}
-				t.err = fmt.Errorf("%s: go2go tool does not support using locally defined type as type argument", t.fset.Position(pos))
+				t.err = fmt.Errorf("%s: go2go tool does not support using locally defined type as type argument", t.fset.Position(x.Pos()))
 				return
 			}
 		}

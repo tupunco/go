@@ -85,7 +85,8 @@ func (check *Checker) rawLookupFieldOrMethod(T Type, addressable bool, pkg *Pack
 	typ, isPtr := deref(T)
 
 	// *typ where typ is an interface has no methods.
-	if isPtr && IsInterface(typ) {
+	// Be cautious: typ may be nil (issue 39634, crash #3).
+	if typ == nil || isPtr && IsInterface(typ) {
 		return
 	}
 
@@ -340,7 +341,7 @@ func (check *Checker) missingMethod(V Type, T *Interface, static bool) (method, 
 			// to see if they can be made to match.
 			// TODO(gri) is this always correct? what about type bounds?
 			// (Alternative is to rename/subst type parameters and compare.)
-			u := check.newUnifier(true)
+			u := newUnifier(check, true)
 			u.x.init(ftyp.tparams)
 			if !u.unify(ftyp, mtyp) {
 				return m, f
@@ -413,7 +414,7 @@ func (check *Checker) missingMethod(V Type, T *Interface, static bool) (method, 
 		// to see if they can be made to match.
 		// TODO(gri) is this always correct? what about type bounds?
 		// (Alternative is to rename/subst type parameters and compare.)
-		u := check.newUnifier(true)
+		u := newUnifier(check, true)
 		u.x.init(ftyp.tparams)
 		if !u.unify(ftyp, mtyp) {
 			return m, f

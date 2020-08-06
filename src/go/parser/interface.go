@@ -55,6 +55,7 @@ const (
 	Trace                                          // print a trace of parsed productions
 	DeclarationErrors                              // report declaration errors
 	SpuriousErrors                                 // same as AllErrors, for backward-compatibility
+	UseBrackets                                    // use square brackets with type parameters
 	AllErrors         = SpuriousErrors             // report all errors (not just the first 10 on different lines)
 )
 

@@ -9,7 +9,6 @@ package types2
 import (
 	"cmd/compile/internal/syntax"
 	"go/constant"
-	"go/token"
 	"sort"
 )
 
@@ -162,14 +161,6 @@ func (check *Checker) openScope(node syntax.Node, comment string) {
 
 func (check *Checker) closeScope() {
 	check.scope = check.scope.Parent()
-}
-
-func assignOp(op token.Token) token.Token {
-	// token_test.go verifies the token ordering this function relies on
-	if token.ADD_ASSIGN <= op && op <= token.AND_NOT_ASSIGN {
-		return op + (token.ADD - token.ADD_ASSIGN)
-	}
-	return token.ILLEGAL
 }
 
 func (check *Checker) suspendedCall(keyword string, call *syntax.CallExpr) {
@@ -366,11 +357,10 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		check.assignment(&x, tch.elem, "send")
 
 	case *syntax.AssignStmt:
-		lhs := unpack(s.Lhs)
-		rhs := unpack(s.Rhs)
-		switch s.Op {
-		// case token.ASSIGN, token.DEFINE:
-		case 0, syntax.Def:
+		lhs := unpackExpr(s.Lhs)
+		rhs := unpackExpr(s.Rhs)
+		if s.Op == 0 || s.Op == syntax.Def {
+			// regular assignment or short variable declaration
 			if len(lhs) == 0 {
 				check.invalidAST(s.Pos(), "missing lhs in assignment")
 				return
@@ -381,18 +371,12 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 				// regular assignment
 				check.assignVars(lhs, rhs)
 			}
-
-		default:
+		} else {
 			// assignment operations
 			if len(lhs) != 1 || len(rhs) != 1 {
 				check.errorf(s.Pos(), "assignment operation %s requires single-valued expressions", s.Op)
 				return
 			}
-			// op := assignOp(s.Tok)
-			// if op == token.ILLEGAL {
-			// 	check.invalidAST(s.Pos(), "unknown assignment operation %s", s.Op)
-			// 	return
-			// }
 			var x operand
 			check.binary(&x, nil, lhs[0], rhs[0], s.Op)
 			if x.mode == invalid {
@@ -416,7 +400,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 
 	case *syntax.ReturnStmt:
 		res := check.sig.results
-		results := unpack(s.Results)
+		results := unpackExpr(s.Results)
 		if res.Len() > 0 {
 			// function returns results
 			// (if one, say the first, result parameter is named, all of them are named)
@@ -625,7 +609,7 @@ func (check *Checker) switchStmt(inner stmtContext, s *syntax.SwitchStmt) {
 			check.invalidAST(clause.Pos(), "incorrect expression switch case")
 			continue
 		}
-		check.caseValues(&x, unpack(clause.Cases), seen)
+		check.caseValues(&x, unpackExpr(clause.Cases), seen)
 		check.openScope(clause, "case")
 		inner := inner
 		if i+1 < len(s.Body) {
@@ -687,7 +671,7 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 			continue
 		}
 		// Check each type in this type switch case.
-		cases := unpack(clause.Cases)
+		cases := unpackExpr(clause.Cases)
 		T := check.caseTypes(&x, xtyp, cases, seen, strict)
 		check.openScope(clause, "case")
 		// If lhs exists, declare a corresponding variable in the case-local scope.
@@ -885,12 +869,12 @@ func rangeKeyVal(typ Type, wantKey, wantVal bool) (Type, Type, string) {
 			msg = "send-only channel"
 		}
 		return typ.elem, Typ[Invalid], msg
-	case *TypeParam:
+	case *Sum:
 		first := true
 		var key, val Type
 		var msg string
-		typ.Bound().is(func(t Type) bool {
-			k, v, m := rangeKeyVal(t, wantKey, wantVal)
+		typ.is(func(t Type) bool {
+			k, v, m := rangeKeyVal(t.Under(), wantKey, wantVal)
 			if k == nil || m != "" {
 				key, val, msg = k, v, m
 				return false

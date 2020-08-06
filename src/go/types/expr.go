@@ -1320,10 +1320,37 @@ func (check *Checker) exprInternal(x *operand, e ast.Expr, hint Type) exprKind {
 		check.selector(x, e)
 
 	case *ast.IndexExpr:
-		check.expr(x, e.X)
+		if check.useBrackets {
+			check.exprOrType(x, e.X)
+		} else {
+			check.expr(x, e.X)
+		}
 		if x.mode == invalid {
 			check.use(e.Index)
 			goto Error
+		}
+
+		if check.useBrackets {
+			if x.mode == typexpr {
+				if isGeneric(x.typ) {
+					// type instantiation
+					x.mode = invalid
+					x.typ = check.typ(e)
+					if x.typ != Typ[Invalid] {
+						x.mode = typexpr
+					}
+					return expression
+				} else {
+					check.errorf(x.pos(), "%s is not a generic type", x.typ)
+					goto Error
+				}
+			}
+
+			if sig := x.typ.Signature(); sig != nil {
+				// TODO(gri) should not evaluate e.X twice
+				call := &ast.CallExpr{Fun: e.X, Lparen: e.Lbrack, Args: []ast.Expr{e.Index}, Rparen: e.Rbrack}
+				return check.call(x, call)
+			}
 		}
 
 		valid := false
